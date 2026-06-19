@@ -3,6 +3,9 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <cstring>
+#include <string>
+#include <sstream>
+#include <unordered_map>
 
 int main() {
 
@@ -27,9 +30,7 @@ setsockopt(
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(8080);
-    if (bind(server_fd,
-             (sockaddr*)&server_addr,
-             sizeof(server_addr)) < 0) {
+    if (bind(server_fd, (sockaddr*)&server_addr,sizeof(server_addr)) < 0) {
 
         perror("bind");
         close(server_fd);
@@ -55,21 +56,86 @@ setsockopt(
     std::cout << "Client connected!\n";
     char buffer[1024];
 
-    int bytes_received = recv(
-    client_fd,
-        buffer,
-        sizeof(buffer) - 1,
-        0
-    );
-
+    int bytes_received = recv(client_fd, buffer,sizeof(buffer) - 1,0);
     if (bytes_received < 0) {
         std::cerr << "Receive failed\n";
     }
     else {
         buffer[bytes_received] = '\0';
-        std::cout << "Received: " << buffer << '\n';
-        send(client_fd, buffer, bytes_received, 0);
-        std::cout << "Echo sent back to client\n";
+
+        std::cout << "\n===== REQUEST =====\n";
+        std::cout << buffer;
+        std::cout << "\n===================\n";
+        std::istringstream request_stream(buffer);
+
+        std::string method;
+        std::string path;
+        std::string version;
+
+        request_stream >> method >> path >> version;
+        std::unordered_map<std::string, std::string> headers;
+
+std::string line;
+
+std::getline(request_stream, line);
+
+while (std::getline(request_stream, line))
+{
+    if (line == "\r" || line.empty())
+        break;
+
+    size_t colon = line.find(':');
+
+    if (colon != std::string::npos)
+    {
+        std::string key = line.substr(0, colon);
+        std::string value = line.substr(colon + 1);
+
+        if (!value.empty() && value[0] == ' ')
+            value.erase(0, 1);
+
+        if (!value.empty() && value.back() == '\r')
+            value.pop_back();
+
+        headers[key] = value;
+    }
+}
+        std::cout << "\nHeaders:\n";
+
+        for (const auto& [key, value] : headers)
+        {
+            std::cout << key << " -> " << value << '\n';
+        }
+
+        std::cout << "Method: " << method << '\n';
+        std::cout << "Path: " << path << '\n';
+        std::cout << "Version: " << version << '\n';
+        std::string body;
+        std::string status_line;
+
+        if (method == "GET")
+{
+    body = "GET Request Received";
+    status_line = "HTTP/1.1 200 OK\r\n";
+}
+else if (method == "POST")
+{
+    body = "POST Request Received";
+    status_line = "HTTP/1.1 200 OK\r\n";
+}
+else
+{
+    body = "Method Not Supported";
+    status_line = "HTTP/1.1 405 Method Not Allowed\r\n";
+}
+        std::string response =
+    status_line +
+        "Content-Type: text/plain\r\n"+
+        "Content-Length: " +
+        std::to_string(body.size()) +
+        "\r\n\r\n" +
+        body;
+        send(client_fd, response.c_str(), response.size(),0);
     }
     close(client_fd);
 }
