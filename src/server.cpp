@@ -10,6 +10,9 @@
 #include <streambuf>
 #include <thread>
 #include <mutex> 
+#include <queue>
+#include <vector>
+#include <condition_variable>
 
 
 std::string getMimeType(const std::string& path)
@@ -31,6 +34,9 @@ std::string getMimeType(const std::string& path)
 
 int request_count = 0;
 std::mutex request_mutex;
+std::queue<int> task_queue;
+std::mutex queue_mutex;
+std::condition_variable queue_cv;
 
 void handleClient(int client_fd){
     std::cout << "Client connected!\n";
@@ -148,6 +154,22 @@ while (std::getline(request_stream, line))
     close(client_fd);
 }
 
+void workerThread()
+{
+    while(true)
+    {
+        int client_fd;
+        std::unique_lock<std::mutex> lock(queue_mutex);
+        queue_cv.wait(lock, []{
+            return !task_queue.empty();
+        });
+        client_fd = task_queue.front();
+        task_queue.pop();
+        lock.unlock();
+        std::cout << "Worker picked up a task\n";
+        handleClient(client_fd);
+    }
+}
 int main() {
 
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -183,6 +205,12 @@ setsockopt(
         close(server_fd);
         return 1;
     }
+    const int NUM_WORKERS = 4;
+    std::vector<std::thread> workers;
+    for(int i = 0; i < NUM_WORKERS; i++)
+    {
+        workers.emplace_back(workerThread);
+    }
     while (true){
     std::cout << "Waiting for a client...\n";
 
@@ -193,8 +221,11 @@ setsockopt(
         close(server_fd);
         return 1;
     }
-    std::thread worker(handleClient, client_fd);
-    worker.detach();
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex);
+        task_queue.push(client_fd);
+    }
+    queue_cv.notify_one();
     }
     
     close(server_fd);
