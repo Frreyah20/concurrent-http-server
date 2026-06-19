@@ -6,6 +6,24 @@
 #include <string>
 #include <sstream>
 #include <unordered_map>
+#include <fstream>
+#include <streambuf>
+std::string getMimeType(const std::string& path)
+{
+    if (path.find(".html") != std::string::npos)
+        return "text/html";
+
+    if (path.find(".css") != std::string::npos)
+        return "text/css";
+
+    if (path.find(".js") != std::string::npos)
+        return "application/javascript";
+
+    if (path.find(".png") != std::string::npos)
+        return "image/png";
+
+    return "text/plain";
+}
 
 int main() {
 
@@ -112,29 +130,55 @@ while (std::getline(request_stream, line))
         std::cout << "Version: " << version << '\n';
         std::string body;
         std::string status_line;
+        std::string file_path;
 
         if (method == "GET")
-{
-    body = "GET Request Received";
-    status_line = "HTTP/1.1 200 OK\r\n";
-}
-else if (method == "POST")
-{
-    body = "POST Request Received";
-    status_line = "HTTP/1.1 200 OK\r\n";
-}
-else
-{
-    body = "Method Not Supported";
-    status_line = "HTTP/1.1 405 Method Not Allowed\r\n";
-}
+        {
+            if (path == "/")
+            {
+                file_path = "../public/index.html";
+            }
+            else
+            {
+                file_path = "../public" + path;
+            }
+
+            std::ifstream file(file_path, std::ios::binary);
+            if (!file.is_open())
+            {
+                body = "File Not Found";
+                status_line = "HTTP/1.1 404 Not Found\r\n";
+            }
+            else
+            {
+                body.assign(
+                    (std::istreambuf_iterator<char>(file)),
+                    std::istreambuf_iterator<char>()
+                );
+
+                status_line = "HTTP/1.1 200 OK\r\n";
+            }
+        }
+        else if (method == "POST")
+        {
+            body = "POST Request Received";
+            status_line = "HTTP/1.1 200 OK\r\n";
+        }
+        else
+        {
+            body = "Method Not Supported";
+            status_line = "HTTP/1.1 405 Method Not Allowed\r\n";
+        }
+        std::cout << "MIME TYPE: "
+          << getMimeType(file_path)
+          << '\n';
         std::string response =
-    status_line +
-        "Content-Type: text/plain\r\n"+
-        "Content-Length: " +
-        std::to_string(body.size()) +
-        "\r\n\r\n" +
-        body;
+            status_line +
+            "Content-Type: " + getMimeType(file_path) + "\r\n"+
+            "Content-Length: " +
+            std::to_string(body.size()) +
+            "\r\n\r\n" +
+            body;
         send(client_fd, response.c_str(), response.size(),0);
     }
     close(client_fd);
