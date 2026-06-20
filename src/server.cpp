@@ -16,6 +16,7 @@
 #include <functional>
 #include <ctime>
 #include <iomanip>
+#include <chrono>
 
 
 std::string getMimeType(const std::string& path)
@@ -35,8 +36,6 @@ std::string getMimeType(const std::string& path)
     return "text/plain";
 }
 
-int request_count = 0;
-std::mutex request_mutex;
 std::queue<int> task_queue;
 std::mutex queue_mutex;
 std::condition_variable queue_cv;
@@ -81,6 +80,17 @@ bool loadConfig(const std::string& filename)
     return true;
 }
 
+struct Metrics
+{
+    int requests_served = 0;
+    int active_connections = 0;
+    int errors = 0;
+    double total_latency_ms = 0.0;
+    std::chrono::steady_clock::time_point start_time;
+    
+}; 
+std::mutex metrics_mutex;
+Metrics metrics;
 class Logger{
 private:
 std::ofstream log_file;
@@ -178,25 +188,26 @@ public:
 Router router;
 Logger logger;
 
-void handleClient(int client_fd){
-    std::cout << "Client connected!\n";
+void handleClient(int client_fd){  
     {
-        std::lock_guard<std::mutex> lock(request_mutex);
-        request_count++;
-        std::cout << "Request Count: " << request_count << '\n';
-    }
+        std::lock_guard<std::mutex> lock(metrics_mutex);
+        metrics.active_connections++;
+    }    
+    std::cout << "Client connected!\n";
     char buffer[1024];
 
     int bytes_received = recv(client_fd, buffer,sizeof(buffer) - 1,0);
+    auto start_time = std::chrono::steady_clock::now();
+
     if (bytes_received < 0) {
         std::cerr << "Receive failed\n";
     }
     else {
         buffer[bytes_received] = '\0';
 
-        std::cout << "\n===== REQUEST =====\n";
-        std::cout << buffer;
-        std::cout << "\n===================\n";
+        //std::cout << "\n===== REQUEST =====\n";
+        //std::cout << buffer;
+        //std::cout << "\n===================\n";
         std::istringstream request_stream(buffer);
 
         std::string method;
@@ -231,28 +242,58 @@ while (std::getline(request_stream, line))
         headers[key] = value;
     }
 }
-        std::cout << "\nHeaders:\n";
 
         for (const auto& [key, value] : headers)
         {
             std::cout << key << " -> " << value << '\n';
         }
 
-        std::cout << "Method: " << method << '\n';
-        std::cout << "Path: " << path << '\n';
-        std::cout << "Version: " << version << '\n';
+        //std::cout << "Method: " << method << '\n';
+        //std::cout << "Path: " << path << '\n';
+        //std::cout << "Version: " << version << '\n';
         logger.info(method + " " + path);
         if(router.hasRoute(method, path))
         {
             std::string body = router.route(method, path);
             std::string response = "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/plain\r\r"
+            "Content-Type: text/plain\r\n" 
             "Content-Length: " + 
             std::to_string(body.size()) +
             "\r\n\r\n" +
             body;
             send(client_fd, response.c_str(), response.size(), 0);
+            auto end_time = std::chrono::steady_clock::now();
+            double latency_ms = std::chrono::duration<double, std::milli> (end_time - start_time).count();
+            {
+                std::lock_guard<std::mutex> lock(metrics_mutex);
+                metrics.requests_served++;
+                metrics.active_connections--;
+                metrics.total_latency_ms += latency_ms;
+                
+            }
+            if(metrics.requests_served > 0)
+            {
+                double error_rate = 100.0 * metrics.errors / metrics.requests_served;
+            }
+            std::cout << "Requests: "
+            <<metrics.requests_served
+            <<" Active: "
+            <<metrics.active_connections
+            <<" Error: "
+            <<metrics.errors
+            <<" Error Rate: "
+            <<error_rate
+            <<"%\n";
             close(client_fd);
+            if(metrics.requests_served > 0)
+            {
+                double avg_latency = metrics.total_latency_ms / metrics.requests_served;
+                auto now = std::chrono::steady_clock::now();
+                double uptime_seconds = std::chrono::duration<double>(now - metrics.start_time).count();
+                double throughput = metrics.requests_served/uptime_seconds;
+                
+                std::cout << "Average Latency: " << avg_latency << " ms\n";
+                std::cout << "Throughput: " << throughput << " req/s\n";            }
             return;
         }
         std::string body;
@@ -277,6 +318,10 @@ while (std::getline(request_stream, line))
                 body = "File Not Found";
                 status_line = "HTTP/1.1 404 Not Found\r\n";
                 status_code = 404;
+                {
+                    std::lock_guard<std::mutex> lock(metrics_mutex);
+                    metrics.errors++;
+                }
             }
             else
             {
@@ -298,6 +343,10 @@ while (std::getline(request_stream, line))
             body = "Method Not Supported";
             status_line = "HTTP/1.1 405 Method Not Allowed\r\n";
             status_code = 405;
+            {
+                std::lock_guard<std::mutex> lock(metrics_mutex);
+                metrics.errors++;
+            }
         }
         logger.info(method + " " + path + " -> " + std::to_string(status_code));
         std::string response =
@@ -310,6 +359,39 @@ while (std::getline(request_stream, line))
             
         send(client_fd, response.c_str(), response.size(),0);
     }
+    auto end_time = std::chrono::steady_clock::now();
+    double latency_ms = std::chrono::duration<double, std::milli> (end_time - start_time).count();
+    {
+        std::lock_guard<std::mutex> lock(metrics_mutex);
+        metrics.requests_served++;
+        metrics.active_connections--;
+        metrics.total_latency_ms+=latency_ms;
+    }
+    if(metrics.requests_served > 0)
+    {
+        double error_rate = 100.0 * metrics.errors / metrics.requests_served;
+    }
+    
+    std::cout 
+        <<"Request: "
+        <<metrics.requests_served
+        <<" Active: "
+        <<metrics.active_connections
+        <<" Errors: "
+        <<metrics.errors
+        <<" Error Rate: "
+        <<error_rate
+        <<"%\n";
+    if(metrics.requests_served > 0)
+        {
+            double avg_latency = metrics.total_latency_ms / metrics.requests_served;
+            auto now = std::chrono::steady_clock::now();
+            double uptime_seconds = std::chrono::duration<double>(now - metrics.start_time).count();
+            double throughput = metrics.requests_served/uptime_seconds;
+            std::cout << "Average Latency: " << avg_latency << " ms\n";
+            std::cout << "Throughput: " << throughput << " req/s\n";
+            
+        }
     close(client_fd);
 }
 
@@ -337,7 +419,7 @@ int main() {
         std::cerr << "Failed to load config\n";
         return 1;
     }
-
+    metrics.start_time = std::chrono::steady_clock::now();
     std::cout << "Port: " << config.port << '\n';
     std::cout << "Workers: " << config.workers << '\n';
     std::cout << "Root: " << config.root << '\n';
