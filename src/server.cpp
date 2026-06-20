@@ -14,6 +14,8 @@
 #include <vector>
 #include <condition_variable>
 #include <functional>
+#include <ctime>
+#include <iomanip>
 
 
 std::string getMimeType(const std::string& path)
@@ -38,6 +40,51 @@ std::mutex request_mutex;
 std::queue<int> task_queue;
 std::mutex queue_mutex;
 std::condition_variable queue_cv;
+
+class Logger{
+private:
+std::ofstream log_file;
+std::mutex log_mutex;
+    std::string getTimestamp()
+    {
+        auto now = std::time(NULL);
+        std::tm* local_time = std::localtime(&now);
+        std::ostringstream oss;
+        oss << std::put_time(local_time, "%Y-%m-%d %H:%M:%S");
+        return oss.str();
+
+    }
+public:
+    Logger()
+    {
+        log_file.open("server.log", std::ios::app); 
+    }
+
+    void info(const std::string &message)
+    {
+        std::lock_guard<std::mutex> lock(log_mutex);
+        std::string log_message = "[" + getTimestamp() + "] [INFO] " + message;
+        std::cout << log_message << '\n';
+        log_file << log_message << '\n';
+        log_file.flush();
+    }
+    void warning(const std::string& message)
+    {
+        std::lock_guard<std::mutex> lock(log_mutex);
+        std::string log_message = "[" + getTimestamp() + "] [WARNING] " + message;
+        std::cout << log_message << '\n';
+        log_file << log_message << '\n';
+        log_file.flush();
+    }
+    void error(const std::string &message)
+    {
+        std::lock_guard<std::mutex> lock(log_mutex);
+        std::string log_message = "[" + getTimestamp() + "] [ERROR] " + message;
+        std::cout << log_message << '\n'; 
+        log_file << log_message << '\n';
+        log_file.flush();
+    }
+};
 
 class Router {
 private:
@@ -89,6 +136,7 @@ public:
 };
 
 Router router;
+Logger logger;
 
 void handleClient(int client_fd){
     std::cout << "Client connected!\n";
@@ -153,6 +201,7 @@ while (std::getline(request_stream, line))
         std::cout << "Method: " << method << '\n';
         std::cout << "Path: " << path << '\n';
         std::cout << "Version: " << version << '\n';
+        logger.info(method + " " + path);
         if(router.hasRoute(method, path))
         {
             std::string body = router.route(method, path);
@@ -169,6 +218,7 @@ while (std::getline(request_stream, line))
         std::string body;
         std::string status_line;
         std::string file_path;
+        int status_code = 200;
 
         if (method == "GET")
         {
@@ -186,6 +236,7 @@ while (std::getline(request_stream, line))
             {
                 body = "File Not Found";
                 status_line = "HTTP/1.1 404 Not Found\r\n";
+                status_code = 404;
             }
             else
             {
@@ -206,7 +257,9 @@ while (std::getline(request_stream, line))
         {
             body = "Method Not Supported";
             status_line = "HTTP/1.1 405 Method Not Allowed\r\n";
+            status_code = 405;
         }
+        logger.info(method + " " + path + " -> " + std::to_string(status_code));
         std::string response =
             status_line +
             "Content-Type: " + getMimeType(file_path) + "\r\n"+
@@ -214,6 +267,7 @@ while (std::getline(request_stream, line))
             std::to_string(body.size()) +
             "\r\n\r\n" +
             body;
+            
         send(client_fd, response.c_str(), response.size(),0);
     }
     close(client_fd);
@@ -286,6 +340,9 @@ setsockopt(
     {
         workers.emplace_back(workerThread);
     }
+    logger.info("Server started");
+    logger.warning("Test warning");
+    logger.error("Test error");
     while (true){
     std::cout << "Waiting for a client...\n";
 
