@@ -271,10 +271,7 @@ while (std::getline(request_stream, line))
                 metrics.total_latency_ms += latency_ms;
                 
             }
-            if(metrics.requests_served > 0)
-            {
-                double error_rate = 100.0 * metrics.errors / metrics.requests_served;
-            }
+            double error_rate = 100.0 * metrics.errors / metrics.requests_served;
             std::cout << "Requests: "
             <<metrics.requests_served
             <<" Active: "
@@ -367,10 +364,7 @@ while (std::getline(request_stream, line))
         metrics.active_connections--;
         metrics.total_latency_ms+=latency_ms;
     }
-    if(metrics.requests_served > 0)
-    {
         double error_rate = 100.0 * metrics.errors / metrics.requests_served;
-    }
     
     std::cout 
         <<"Request: "
@@ -446,7 +440,7 @@ int main() {
         return 1;
     }
 
-    if (listen(server_fd, 5) < 0) {
+    if (listen(server_fd, 1024) < 0) {
         std::cerr << "Listen failed\n";
         close(server_fd);
         return 1;
