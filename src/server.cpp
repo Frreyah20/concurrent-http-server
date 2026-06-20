@@ -41,6 +41,46 @@ std::queue<int> task_queue;
 std::mutex queue_mutex;
 std::condition_variable queue_cv;
 
+struct Config
+{
+    int port;
+    int workers;
+    std::string root;
+};
+Config config;
+bool loadConfig(const std::string& filename)
+{
+    std::ifstream file(filename);
+    if(!file.is_open())
+    {
+        return false;
+    }
+    std::string line;
+    while(std::getline(file, line))
+    {
+        size_t pos = line.find('=');
+        if(pos == std::string::npos)
+        {
+            continue;
+        }
+        std::string key = line.substr(0, pos);
+        std::string value = line.substr(pos+1);
+        if(key == "port")
+        {
+            config.port = std::stoi(value);
+        }
+        else if(key == "workers")
+        {
+            config.workers = std::stoi(value);
+        }
+        else if(key == "root")
+        {
+            config.root = value;
+        }
+    }
+    return true;
+}
+
 class Logger{
 private:
 std::ofstream log_file;
@@ -78,7 +118,7 @@ public:
     }
     void error(const std::string &message)
     {
-        std::lock_guard<std::mutex> lock(log_mutex);
+        std::lock_guard<std::mutex> lock(log_mutex); 
         std::string log_message = "[" + getTimestamp() + "] [ERROR] " + message;
         std::cout << log_message << '\n'; 
         log_file << log_message << '\n';
@@ -224,11 +264,11 @@ while (std::getline(request_stream, line))
         {
             if (path == "/")
             {
-                file_path = "../public/index.html";
+                file_path = config.root + "/index.html";
             }
             else
             {
-                file_path = "../public" + path;
+                file_path = config.root + path;
             }
 
             std::ifstream file(file_path, std::ios::binary);
@@ -289,18 +329,23 @@ void workerThread()
         handleClient(client_fd);
     }
 }
+
+
 int main() {
+    if (!loadConfig("../config.txt"))
+    {
+        std::cerr << "Failed to load config\n";
+        return 1;
+    }
+
+    std::cout << "Port: " << config.port << '\n';
+    std::cout << "Workers: " << config.workers << '\n';
+    std::cout << "Root: " << config.root << '\n';
 
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     int opt = 1;
 
-setsockopt(
-    server_fd,
-    SOL_SOCKET,
-    SO_REUSEADDR,
-    &opt,
-    sizeof(opt)
-);
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     if (server_fd < 0) {
         std::cerr << "Failed to create socket\n";
@@ -311,7 +356,7 @@ setsockopt(
 
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(8080);
+    server_addr.sin_port = htons(config.port);
     if (bind(server_fd, (sockaddr*)&server_addr,sizeof(server_addr)) < 0) {
 
         perror("bind");
@@ -334,7 +379,7 @@ setsockopt(
     std::cout<<router.route("GET", "/about") << '\n';
     std::cout<<router.route("POST", "/api/data") << '\n';
 
-    const int NUM_WORKERS = 4;
+    const int NUM_WORKERS = config.workers;
     std::vector<std::thread> workers;
     for(int i = 0; i < NUM_WORKERS; i++)
     {
