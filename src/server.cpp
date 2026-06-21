@@ -264,9 +264,6 @@ if(request.empty())
 auto start_time = std::chrono::steady_clock::now();
 
 std::istringstream request_stream(request);
-std::cout << "\n===== REQUEST =====\n";
-std::cout << request;
-std::cout << "\n===================\n";
 
     std::string method;
     std::string path;
