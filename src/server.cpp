@@ -21,6 +21,7 @@
 #include <atomic>
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 
 
 
@@ -88,6 +89,12 @@ bool loadConfig(const std::string& filename)
     return true;
 }
 
+bool sendRequest(int fd, const std::string& response)
+{
+    ssize_t sent = send(fd, response.c_str(), response.size(), 0);
+    return sent >= 0;
+}
+
 struct Metrics
 {
     std::atomic<int> requests_served{0};
@@ -99,6 +106,9 @@ struct Metrics
 }; 
 std::mutex metrics_mutex;
 Metrics metrics;
+const size_t MAX_HEADER_SIZE = 8192;
+const size_t MAX_HEADER_COUNT = 100;
+
 class Logger{
 private:
 std::ofstream log_file;
@@ -214,29 +224,36 @@ void handleClient(int client_fd){
 while(request.find("\r\n\r\n") == std::string::npos)
 {
     char buffer[4096];
-
-    int bytes_received =
-        recv(client_fd,
-             buffer,
-             sizeof(buffer),
-             0);
-
+    int bytes_received = recv(client_fd,buffer,sizeof(buffer), 0);
     if(bytes_received <= 0)
     {
+        if(bytes_received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+        {
+            std::string response = 
+            "HTTP/1.1 408 Request Timeout\r\n"
+            "Connection: close\r\n"
+            "Content-Length: 0\r\n\r\n";
+            if(!sendRequest(client_fd, response))
+            {
+                break;
+            }
+        }
         request.clear();
         break;
     }
-
     request.append(buffer, bytes_received);
-    std::cout << "Received " << bytes_received << " bytes\n";
-    size_t count = 0;
-    size_t pos = 0;
-    while((pos = request.find("\r\n\r\n", pos)) != std::string::npos)
+    if(request.size() > MAX_HEADER_SIZE)
     {
-        count++;
-        pos+=4;
+        std::string response = "HTTP/1.1 431 Request Header Fields Too Large\r\n"
+        "Connection: close\r\n"
+        "Content-Length: 0\r\n\r\n";
+        if(!sendRequest(client_fd, response))
+        {
+            break;
+        }
+        close(client_fd);
+        return;
     }
-    std::cout << "Requests in buffer: " << count << "\n";
 }
 
 if(request.empty())
@@ -256,30 +273,114 @@ std::cout << "\n===================\n";
     std::string version;
 
     request_stream >> method >> path >> version;
-    std::unordered_map<std::string, std::string> headers;
+    if(path.find("..") != std::string::npos)
+    {
+        std::string response = 
+        "HTTP/1.1 403 Forbidden\r\n"
+        "Connection: close\r\n"
+        "Content-Length: 0\r\n\r\n";
+        if(!sendRequest(client_fd, response))
+            {
+                break;
+            }
+        break;
+    }
+    if(path.find('\\') != std::string::npos)
+    {
+        std::string response = 
+        "HTTP/1.1 403 Forbidden\r\n"
+        "Connection: close\r\n"
+        "Content-Length: 0\r\n\r\n";
+        if(!sendRequest(client_fd, response))
+            {
+                break;
+            }
+        break;
+    }
+    if(method.empty() || path.empty() || version.empty())
+    {
+        std::string response = 
+        "HTTP/1.1 400 Bad Request\r\n"
+        "Connection: close\r\n"
+        "Content-Length: 0\r\n\r\n";
+        if(!sendRequest(client_fd, response))
+            {
+                break;
+            }
+        break;
+    }
+    if(version != "HTTP/1.0" && version != "HTTP/1.1")
+    {
+        std::string response = 
+        "HTTP/1.1 400 Bad Request\r\n"
+        "Connection: close\r\n"
+        "Content-Length: 0\r\n\r\n";
+       if(!sendRequest(client_fd, response))
+            {
+                break;
+            }
+        break;
+    }
+    if(method != "GET" && method != "POST")
+    {
+        std::string response = 
+        "HTTP/1.1 405 Method Not Allowed\r\n"
+        "Connection: close\r\n"
+        "Content-Length: 0\r\n\r\n";
+        if(!sendRequest(client_fd, response))
+            {
+                break;
+            }
+        break;
+    }
 
+    std::unordered_map<std::string, std::string> headers;
     std::string line;
     std::getline(request_stream, line);
+    size_t header_count = 0;
     while (std::getline(request_stream, line))
     {
         if (line == "\r" || line.empty())
         {
             break;
         }
-        size_t colon = line.find(':');
-        if (colon != std::string::npos)
+        header_count++;
+        if(header_count > MAX_HEADER_COUNT)
         {
-            std::string key = line.substr(0, colon);
-            std::string value = line.substr(colon + 1);
-
-            if (!value.empty() && value[0] == ' ')
-                value.erase(0, 1);
-
-            if (!value.empty() && value.back() == '\r')
-                value.pop_back();
-
-            headers[key] = value;
+            std::string response = 
+            "HTTP/1.1 431 Request Header Fields Too Large\r\n"
+            "Connection: close\r\n"
+            "Content-Length: 0\r\n\r\n";
+            if(!sendRequest(client_fd, response))
+            {
+                break;
+            }
+            break;
         }
+        size_t colon = line.find(':');
+        if (colon == std::string::npos)
+        {
+            std::string response = 
+            "HTTP/1.1 400 Bad Request\r\n"
+            "Connection: close\r\n"
+            "Content-Length: 0\r\n\r\n";
+            if(!sendRequest(client_fd, response))
+            {
+                break;
+            }
+            break;
+        }
+        std::string key = line.substr(0, colon);
+        std::string value = line.substr(colon + 1);
+        if (!value.empty() && value[0] == ' ')
+        {
+            value.erase(0, 1);
+        }
+        if (!value.empty() && value.back() == '\r')
+        {   
+            value.pop_back();
+        }
+        headers[key] = value;
     }
     bool keep_alive = true;
     if(version == "HTTP/1.0")
@@ -326,7 +427,10 @@ std::cout << "\n===================\n";
         std::to_string(body.size()) +
         "\r\n\r\n" +
         body;
-        send(client_fd, response.c_str(), response.size(), 0);
+        if(!sendRequest(client_fd, response))
+            {
+                break;
+            }
         auto end_time = std::chrono::steady_clock::now();
         double latency_ms = std::chrono::duration<double, std::milli> (end_time - start_time).count();
         {
@@ -423,7 +527,10 @@ std::cout << "\n===================\n";
             std::to_string(body.size()) + 
             "\r\n\r\n" + 
             body;
-        send(client_fd, response.c_str(), response.size(), 0); 
+        if(!sendRequest(client_fd, response))
+            {
+                break;
+            } 
         auto end_time = std::chrono::steady_clock::now();
         double latency_ms = std::chrono::duration<double, std::milli> (end_time - start_time).count();
         {
