@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include "logger/logger.h"
 
 
 
@@ -109,50 +110,7 @@ Metrics metrics;
 const size_t MAX_HEADER_SIZE = 8192;
 const size_t MAX_HEADER_COUNT = 100;
 
-class Logger{
-private:
-std::ofstream log_file;
-std::mutex log_mutex;
-    std::string getTimestamp()
-    {
-        auto now = std::time(NULL);
-        std::tm* local_time = std::localtime(&now);
-        std::ostringstream oss;
-        oss << std::put_time(local_time, "%Y-%m-%d %H:%M:%S");
-        return oss.str();
 
-    }
-public:
-    Logger()
-    {
-        log_file.open("server.log", std::ios::app); 
-    }
-
-    void info(const std::string &message)
-    {
-        std::lock_guard<std::mutex> lock(log_mutex);
-        std::string log_message = "[" + getTimestamp() + "] [INFO] " + message;
-        std::cout << log_message << '\n';
-        log_file << log_message << '\n';
-        log_file.flush();
-    }
-    void warning(const std::string& message)
-    {
-        std::lock_guard<std::mutex> lock(log_mutex);
-        std::string log_message = "[" + getTimestamp() + "] [WARNING] " + message;
-        std::cout << log_message << '\n';
-        log_file << log_message << '\n';
-        log_file.flush();
-    }
-    void error(const std::string &message)
-    {
-        std::lock_guard<std::mutex> lock(log_mutex); 
-        std::string log_message = "[" + getTimestamp() + "] [ERROR] " + message;
-        std::cout << log_message << '\n'; 
-        log_file << log_message << '\n';
-        log_file.flush();
-    }
-};
 
 class Router {
 private:
