@@ -26,38 +26,14 @@
 #include "router/router.h"
 #include "config/config.h"
 #include "threadpool/thread_pool.h"
+#include "http/response.h"
 
-
-
-std::string getMimeType(const std::string& path)
-{
-    if (path.find(".html") != std::string::npos)
-        return "text/html";
-
-    if (path.find(".css") != std::string::npos)
-        return "text/css";
-
-    if (path.find(".js") != std::string::npos)
-        return "application/javascript";
-
-    if (path.find(".png") != std::string::npos)
-        return "image/png";
-
-    return "text/plain";
-}
 
 std::queue<int> task_queue;
 std::mutex queue_mutex;
 std::condition_variable queue_cv;
 std::atomic<bool> running(true);
 int server_fd;
-
-
-bool sendRequest(int fd, const std::string& response)
-{
-    ssize_t sent = send(fd, response.c_str(), response.size(), 0);
-    return sent >= 0;
-}
 
 struct Metrics
 {

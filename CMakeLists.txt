@@ -11,4 +11,26 @@ add_executable(server
     src/router/router.cpp
     src/config/config.cpp
     src/threadpool/thread_pool.cpp
+    src/http/response.cpp
 )
+
+enable_testing()
+
+find_package(GTest REQUIRED)
+
+add_executable(unit_tests
+    tests/router_test.cpp
+    tests/response_test.cpp
+    tests/config_test.cpp
+
+    src/router/router.cpp
+    src/http/response.cpp
+    src/config/config.cpp
+)
+
+target_link_libraries(unit_tests
+    GTest::gtest
+    GTest::gtest_main
+)
+
+add_test(NAME unit_tests COMMAND unit_tests)

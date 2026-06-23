@@ -4,6 +4,7 @@
 #include <queue>
 #include <condition_variable>
 #include <atomic>
+#include "../logger/logger.h"
 
 extern std::queue<int> task_queue;
 extern std::mutex queue_mutex;
