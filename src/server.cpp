@@ -23,6 +23,8 @@
 #include <cctype>
 #include <cerrno>
 #include "logger/logger.h"
+#include "router/router.h"
+#include "config/config.h"
 
 
 
@@ -50,45 +52,6 @@ std::condition_variable queue_cv;
 std::atomic<bool> running(true);
 int server_fd;
 
-struct Config
-{
-    int port;
-    int workers;
-    std::string root;
-};
-Config config;
-bool loadConfig(const std::string& filename)
-{
-    std::ifstream file(filename);
-    if(!file.is_open())
-    {
-        return false;
-    }
-    std::string line;
-    while(std::getline(file, line))
-    {
-        size_t pos = line.find('=');
-        if(pos == std::string::npos)
-        {
-            continue;
-        }
-        std::string key = line.substr(0, pos);
-        std::string value = line.substr(pos+1);
-        if(key == "port")
-        {
-            config.port = std::stoi(value);
-        }
-        else if(key == "workers")
-        {
-            config.workers = std::stoi(value);
-        }
-        else if(key == "root")
-        {
-            config.root = value;
-        }
-    }
-    return true;
-}
 
 bool sendRequest(int fd, const std::string& response)
 {
@@ -109,57 +72,6 @@ std::mutex metrics_mutex;
 Metrics metrics;
 const size_t MAX_HEADER_SIZE = 8192;
 const size_t MAX_HEADER_COUNT = 100;
-
-
-
-class Router {
-private:
-    std::unordered_map<std::string, std::function<std::string()>> get_routes;
-    std::unordered_map<std::string, std::function<std::string()>> post_routes;
-
-public:
-    std::string route(const std::string &method, const std::string &path)
-    {
-        if(method == "GET")
-        {
-            auto it = get_routes.find(path);
-            if(it != get_routes.end())
-            {
-                return it->second();
-            }
-        }
-        
-        if(method == "POST")
-        {
-            auto it = post_routes.find(path);
-            if(it != post_routes.end())
-            {
-                return it->second();
-            }
-        }
-        return "404 Not Found";
-    }
-    void get(const std::string& path, std::function<std::string()> handler)
-    {
-        get_routes[path] = handler;
-    }
-    void post(const std::string &path, std::function<std::string()>handler)
-    {
-        post_routes[path] = handler;
-    }
-    bool hasRoute(const std::string &method, std::string &path)
-    {
-        if(method == "GET")
-        {
-            return get_routes.find(path) != get_routes.end();
-        }
-        if(method == "POST")
-        {
-            return post_routes.find(path) != post_routes.end();
-        }
-        return false;
-    }
-};
 
 Router router;
 Logger logger;
